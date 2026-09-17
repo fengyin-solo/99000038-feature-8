@@ -74,7 +74,9 @@ export const importApi = {
 
 // Health Check API
 export const healthCheckApi = {
-  checkAll: () => api.post('/health-check/all', {}, { timeout: 600000 }),
+  getTargets: () => api.get('/health-check/targets'),
+  getSummary: () => api.get('/health-check/summary'),
+  checkLink: (id) => api.post(`/health-check/link/${id}`, {}, { timeout: 30000 }),
   getDeadLinks: () => api.get('/health-check/dead'),
 }
 

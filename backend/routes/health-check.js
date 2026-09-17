@@ -8,46 +8,58 @@ const router = express.Router();
 // All routes require authentication
 router.use(authMiddleware);
 
-// POST /api/health-check/all - Check all links for the user
-router.post('/all', async (req, res) => {
+// GET /api/health-check/targets - List all links to be checked
+router.get('/targets', (req, res) => {
   const userId = req.userId;
   const db = getDb();
 
-  const links = db.prepare('SELECT id, url FROM links WHERE user_id = ?').all(userId);
+  const links = db.prepare('SELECT id, url, title FROM links WHERE user_id = ? ORDER BY id').all(userId);
 
-  if (links.length === 0) {
-    return res.json({ message: 'No links to check', results: [] });
+  res.json(links);
+});
+
+// GET /api/health-check/summary - Status counts derived from the database
+router.get('/summary', (req, res) => {
+  const userId = req.userId;
+  const db = getDb();
+
+  const rows = db.prepare(`
+    SELECT status, COUNT(*) as count
+    FROM links
+    WHERE user_id = ?
+    GROUP BY status
+  `).all(userId);
+
+  const summary = { total: 0, alive: 0, dead: 0, unchecked: 0 };
+  rows.forEach((row) => {
+    summary[row.status] = row.count;
+    summary.total += row.count;
+  });
+
+  res.json(summary);
+});
+
+// POST /api/health-check/link/:id - Check a single link
+router.post('/link/:id', async (req, res) => {
+  const userId = req.userId;
+  const db = getDb();
+
+  const link = db.prepare('SELECT id, url FROM links WHERE id = ? AND user_id = ?').get(req.params.id, userId);
+  if (!link) {
+    return res.status(404).json({ error: 'Link not found' });
   }
 
-  const results = [];
-  const updateStmt = db.prepare('UPDATE links SET status = ?, last_checked = CURRENT_TIMESTAMP WHERE id = ?');
+  const result = await checkUrl(link.url);
+  const status = result.alive ? 'alive' : 'dead';
 
-  // Process links sequentially to avoid overwhelming servers
-  for (let i = 0; i < links.length; i++) {
-    const link = links[i];
-    const result = await checkUrl(link.url);
-
-    const status = result.alive ? 'alive' : 'dead';
-    updateStmt.run(status, link.id);
-
-    results.push({
-      id: link.id,
-      url: link.url,
-      status,
-      http_status: result.status,
-      error: result.error,
-    });
-  }
-
-  const aliveCount = results.filter((r) => r.status === 'alive').length;
-  const deadCount = results.filter((r) => r.status === 'dead').length;
+  db.prepare('UPDATE links SET status = ?, last_checked = CURRENT_TIMESTAMP WHERE id = ?').run(status, link.id);
 
   res.json({
-    message: `Checked ${results.length} links`,
-    total: results.length,
-    alive: aliveCount,
-    dead: deadCount,
-    results,
+    id: link.id,
+    url: link.url,
+    status,
+    http_status: result.status,
+    error: result.error,
   });
 });
 
