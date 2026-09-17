@@ -62,6 +62,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { useLinksStore } from '../stores/links'
 import CategorySidebar from '../components/CategorySidebar.vue'
@@ -70,6 +71,8 @@ import SearchBar from '../components/SearchBar.vue'
 import LinkCard from '../components/LinkCard.vue'
 import LinkForm from '../components/LinkForm.vue'
 
+const route = useRoute()
+const router = useRouter()
 const linksStore = useLinksStore()
 
 const formVisible = ref(false)
@@ -85,6 +88,12 @@ onMounted(() => {
   linksStore.fetchLinks()
   linksStore.fetchCategories()
   linksStore.fetchTags()
+
+  // Arrived from the dead-links empty state: jump straight to adding a link
+  if (route.query.add === '1') {
+    formVisible.value = true
+    router.replace({ query: {} })
+  }
 })
 
 function showAddDialog() {

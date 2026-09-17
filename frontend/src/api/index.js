@@ -75,6 +75,10 @@ export const importApi = {
 // Health Check API
 export const healthCheckApi = {
   checkAll: () => api.post('/health-check/all', {}, { timeout: 600000 }),
+  // Check one link; a timeout/refusal only marks that link as 'failed'
+  checkOne: (id) => api.post(`/health-check/${id}`, {}, { timeout: 20000 }),
+  // Counts + per-link state, used to restore the page after navigation/refresh
+  getStatus: () => api.get('/health-check/status'),
   getDeadLinks: () => api.get('/health-check/dead'),
 }
 

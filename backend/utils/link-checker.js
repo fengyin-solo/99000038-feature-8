@@ -1,80 +1,94 @@
 /**
- * Check if a URL is alive using fetch with timeout
- * Returns: { url, status, alive, error }
+ * Check if a URL is reachable using fetch with timeout.
+ *
+ * Statuses are split into three outcomes so the UI can treat them differently:
+ * - alive:  HTTP response with status < 400
+ * - dead:   server responded with an HTTP error (4xx/5xx), the link itself is broken
+ * - failed: no usable response (timeout, connection refused, DNS error, ...),
+ *           the result is inconclusive and the link can be retried on its own
+ *
+ * Returns: { url, status, alive, error, outcome }
  */
-async function checkUrl(url, timeoutMs = 5000) {
+function classifyResponse(httpStatus) {
+  return {
+    alive: httpStatus >= 200 && httpStatus < 400,
+    outcome: httpStatus >= 400 ? 'dead' : 'alive',
+  };
+}
+
+async function fetchOnce(url, method, timeoutMs) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(url, {
-      method: 'HEAD',
+      method,
       signal: controller.signal,
       redirect: 'follow',
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
       },
     });
-
+    return response;
+  } finally {
     clearTimeout(timeoutId);
+  }
+}
 
-    const alive = response.status >= 200 && response.status < 400;
+async function checkUrl(url, timeoutMs = 8000) {
+  try {
+    let response;
+    try {
+      response = await fetchOnce(url, 'HEAD', timeoutMs);
+    } catch (headErr) {
+      // Network-level failure on HEAD: fall back to GET, as some servers
+      // reject HEAD outright (and others refuse it with 403/405).
+      if (headErr.name === 'AbortError') {
+        // Do not spend another timeout window on a slow/unreachable host.
+        throw headErr;
+      }
+      response = await fetchOnce(url, 'GET', timeoutMs);
+    }
+
+    // Some hosts answer HEAD with 403/405/501 even though GET works.
+    if ([403, 405, 501].includes(response.status)) {
+      response = await fetchOnce(url, 'GET', timeoutMs);
+    }
+
+    const { alive, outcome } = classifyResponse(response.status);
     return {
       url,
       status: response.status,
       alive,
+      outcome,
       error: null,
     };
   } catch (err) {
-    clearTimeout(timeoutId);
-
-    // If HEAD fails, try GET as some servers don't support HEAD
-    if (err.name !== 'AbortError') {
-      try {
-        const controller2 = new AbortController();
-        const timeoutId2 = setTimeout(() => controller2.abort(), timeoutMs);
-
-        const response = await fetch(url, {
-          method: 'GET',
-          signal: controller2.signal,
-          redirect: 'follow',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-          },
-        });
-
-        clearTimeout(timeoutId2);
-
-        const alive = response.status >= 200 && response.status < 400;
-        return {
-          url,
-          status: response.status,
-          alive,
-          error: null,
-        };
-      } catch (err2) {
-        // Fall through to error handling
-      }
-    }
-
+    const isTimeout = err.name === 'AbortError';
     return {
       url,
       status: null,
       alive: false,
-      error: err.name === 'AbortError' ? 'Timeout' : err.message,
+      outcome: 'failed',
+      error: isTimeout ? 'Timeout' : (err.message || 'Network error'),
     };
   }
 }
 
 /**
- * Check multiple URLs one at a time
+ * Check multiple URLs one at a time.
  * @param {string[]} urls
  * @param {function} onProgress - callback(current, total, result)
+ * @param {function} shouldCancel - optional predicate checked between links
  */
-async function checkUrls(urls, onProgress = null) {
+async function checkUrls(urls, onProgress = null, shouldCancel = null) {
   const results = [];
 
   for (let i = 0; i < urls.length; i++) {
+    if (shouldCancel && shouldCancel()) {
+      break;
+    }
+
     const result = await checkUrl(urls[i]);
     results.push(result);
 

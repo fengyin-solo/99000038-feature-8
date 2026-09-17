@@ -146,14 +146,18 @@ link-collector/
 - `POST /api/import/bookmarks` - 导入 Chrome 书签
 
 ### 死链检测
-- `POST /api/health-check/all` - 检测所有链接
+- `POST /api/health-check/all` - 检测所有链接（批量接口）
+- `POST /api/health-check/:id` - 检测单条链接（前端逐条调用以展示进度/支持中断/单独重试）
+- `GET /api/health-check/status` - 获取检测统计计数与每条链接的检测状态（用于页面状态恢复）
 - `GET /api/health-check/dead` - 获取失效链接列表
+
+链接状态分为：`alive`（正常）、`dead`（服务器返回 4xx/5xx，确认失效）、`failed`（超时/拒绝连接/网络错误，结论不确定，可单独重试）、`unchecked`（未检测）。
 
 ## 数据库表结构
 
 - **users**: 用户表 (id, username, email, password, created_at)
 - **categories**: 分类表 (id, user_id, name, color)
-- **links**: 链接表 (id, user_id, url, title, description, category_id, status, last_checked, created_at)
+- **links**: 链接表 (id, user_id, url, title, description, category_id, status, http_status, check_error, last_checked, created_at)
 - **link_tags**: 标签关联表 (id, link_id, tag)
 
 ## 导入 Chrome 书签
